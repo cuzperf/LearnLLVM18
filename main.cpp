@@ -2,53 +2,32 @@
  * @file    main.cpp
  * @brief   LLVM 18 JIT 编译与执行示例（含 GDB 调试支持）
  *
- * 本程序演示了如何使用 LLVM 18 的 ORC JIT API 完成以下步骤：
- *   1. 初始化 LLVM 环境（目标平台、上下文）
- *   2. 使用 IRBuilder 构造一个加法函数 add(int, int) -> int
- *   3. 使用 DIBuilder 为生成的 IR 注入 DWARF 调试信息
- *   4. 通过 enableDebuggerSupport 注册 JIT 代码到 GDB
- *   5. 将 IR Module 提交给 LLJIT 引擎进行即时编译
- *   6. 通过符号查找获取函数指针并调用执行
+ * 本程序演示了如何使用 LLVM 18 的 ORC JIT API：
+ *   1. jit_add  — 简单加法函数，演示基本的 IR 生成与调试
+ *   2. jit_gcd  — 欧几里得算法，调试信息映射到真实源文件 jit_demo.cpp
  *
  * 构建依赖：LLVM 18 (libLLVM-18)
- * 编译器要求：C++17（LLVM 18 要求 C++17）
- *
- * GDB 调试：
- *   启动后程序会等待 GDB attach，然后编译并执行 JIT 函数。
- *   设置断点后可 F11 步入 JIT 生成的 add 函数。
+ * 编译器要求：C++17
  */
 
-// ---------- LLVM 核心 IR 头文件 ----------
-#include <llvm/IR/LLVMContext.h>       // LLVMContext: 线程安全的 LLVM 数据结构上下文
-#include <llvm/IR/Module.h>             // Module: LLVM IR 的顶级容器，包含函数、全局变量等
-#include <llvm/IR/IRBuilder.h>          // IRBuilder: 简化 IR 指令构造的工具类
-#include <llvm/IR/Function.h>           // Function: 表示 IR 中的函数
-#include <llvm/IR/Verifier.h>           // verifyModule/verifyFunction: 验证 IR 正确性
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Verifier.h>
+#include <llvm/IR/DIBuilder.h>
 
-// ---------- 调试信息（DWARF）生成 ----------
-#include <llvm/IR/DIBuilder.h>          // DIBuilder: 为 IR 注入 DWARF 调试信息
-
-// ---------- ORC JIT 引擎头文件 ----------
-// LLJIT 是 LLVM 18 推荐的 JIT 引擎，内部自动集成：
-//   - 目标平台的代码生成（通过 nativecodegen）
-//   - 内存管理（可执行内存的分配与释放）
-//   - 符号解析（在同一 JIT 实例内的 Module 间查找符号）
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
-
-// ---------- 调试器支持 ----------
-// enableDebuggerSupport 将 JIT 编译的内存区域注册到 GDB，
-// 使 GDB 能够识别、反汇编并步入 JIT 生成的代码。
 #include <llvm/ExecutionEngine/Orc/Debugging/DebuggerSupport.h>
 #include <llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h>
 #include <llvm/Support/DynamicLibrary.h>
-
-// ---------- 目标平台与错误处理 ----------
-#include <llvm/Support/TargetSelect.h>  // InitializeNativeTarget / InitializeNativeTargetAsmPrinter
-#include <llvm/Support/Error.h>         // ExitOnError: 将 Expected<T> 转换为 T，失败时退出
-#include <llvm/Support/raw_ostream.h>   // outs() / errs(): LLVM 的流式输出
+#include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <iostream>
 #include <memory>
+#include <string>
 #include <unistd.h>
 
 using namespace llvm;
@@ -57,139 +36,227 @@ using namespace llvm::orc;
 int main()
 {
     // ========================================================================
-    // 第 1 步：初始化本地目标平台
+    // 环境初始化
     // ========================================================================
     InitializeNativeTarget();
     InitializeNativeTargetAsmPrinter();
 
-    // ========================================================================
-    // 第 2 步：创建 LLVMContext 和 Module
-    // ========================================================================
     LLVMContext Context;
     auto module = std::make_unique<Module>("jit_demo", Context);
-
-    // ========================================================================
-    // 第 3 步：定义函数签名 int add(int, int)
-    // ========================================================================
-    FunctionType *FT = FunctionType::get(
-        Type::getInt32Ty(Context),
-        {Type::getInt32Ty(Context),
-         Type::getInt32Ty(Context)},
-        false);                                        // 非变参
-
-    Function *AddFunc = Function::Create(FT, Function::ExternalLinkage, "jit_add", module.get());
-
-    // ========================================================================
-    // 第 4 步：使用 DIBuilder 为 add 函数生成调试信息
-    // ========================================================================
     DIBuilder DIB(*module);
 
-    auto *File = DIB.createFile("jit_demo.cpp", ".");   // 源文件名（GDB 显示用）
+    // 调试用基本类型
+    auto *IntTy   = DIB.createBasicType("int", 32, dwarf::DW_ATE_signed);
+    auto *Int32Ty = Type::getInt32Ty(Context);
+
+    // ---- 用于 jit_add 的虚假源文件（行号仅供演示） ----
+    auto *AddFile = DIB.createFile("jit_add.cpp", ".");
     auto *CU = DIB.createCompileUnit(
         dwarf::DW_LANG_C_plus_plus,
-        File,
-        "LLVM JIT Demo",
-        false,                                           // 非优化构建（便于调试）
-        "", 0);
+        AddFile, "LLVM JIT Demo",
+        false, "", 0);
 
-    // 调试用基本类型 "int"（32 位有符号整数）
-    auto *IntTy = DIB.createBasicType("int", 32, dwarf::DW_ATE_signed);
-
-    // 构造函数类型元数据数组：[返回值, 参数1, 参数2]
-    SmallVector<Metadata *, 3> EltTys = {IntTy, IntTy, IntTy};
-    auto *SubRoutineTy = DIB.createSubroutineType(DIB.getOrCreateTypeArray(EltTys));
-
-    // 创建 DISubprogram —— 即 add 函数的调试信息描述
-    auto *SP = DIB.createFunction(
-        CU, "jit_add", "jit_add", File,
-        1,                                  // 定义行号
-        SubRoutineTy,
-        1,                                  // 作用域行号
-        DINode::FlagPrototyped,
-        DISubprogram::SPFlagDefinition);
-    AddFunc->setSubprogram(SP);
-
-    // 为函数参数创建 DILocalVariable（GDB 中可显示参数名和类型）
-    auto *ParmA = DIB.createParameterVariable(
-        SP, "a", 1, File, 1, IntTy, true,
-        DINode::FlagZero);
-    auto *ParmB = DIB.createParameterVariable(
-        SP, "b", 2, File, 1, IntTy, true,
-        DINode::FlagZero);
+    // ---- 用于 jit_gcd 的真实源文件路径 ----
+    // PROJECT_SOURCE_DIR 由 CMake 注入，确保 GDB 能定位到 jit_demo.cpp
+    std::string GcdFilePath = std::string(PROJECT_SOURCE_DIR) + "/jit_demo.cpp";
+    std::string GcdFileDir  = std::string(PROJECT_SOURCE_DIR);
+    auto *GcdFile = DIB.createFile(GcdFilePath, GcdFileDir);
 
     // ========================================================================
-    // 第 5 步：填充函数体（含调试行号与参数绑定）
+    // 函数 1：jit_add —— int add(int a, int b)
     // ========================================================================
-    BasicBlock *BB = BasicBlock::Create(Context, "entry", AddFunc);
-    IRBuilder<> Builder(BB);
+    {
+        FunctionType *FT = FunctionType::get(Int32Ty, {Int32Ty, Int32Ty}, false);
+        Function *F = Function::Create(FT, Function::ExternalLinkage, "jit_add", module.get());
 
-    // 获取 IR 参数并为其关联调试信息变量
-    auto args = AddFunc->args();
-    auto it = args.begin();
-    Value *A = it++;
-    Value *B = it;
+        SmallVector<Metadata *, 3> EltTys = {IntTy, IntTy, IntTy};
+        auto *SubRoutineTy = DIB.createSubroutineType(DIB.getOrCreateTypeArray(EltTys));
+        auto *SP = DIB.createFunction(
+            CU, "jit_add", "jit_add", AddFile,
+            1, SubRoutineTy, 1,
+            DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
+        F->setSubprogram(SP);
 
-    // 在 entry 块起始处插入 dbg.value，将参数绑定到调试元数据
-    // 注意：函数参数存放在寄存器中，应使用 insertDbgValueIntrinsic
-    //        而非 insertDeclare（后者期望栈上 alloca）
-    Builder.SetCurrentDebugLocation(DILocation::get(Context, 1, 1, SP));
-    DIB.insertDbgValueIntrinsic(A, ParmA, DIB.createExpression(),
-                                DILocation::get(Context, 1, 1, SP), BB);
-    DIB.insertDbgValueIntrinsic(B, ParmB, DIB.createExpression(),
-                                DILocation::get(Context, 1, 1, SP), BB);
+        auto *ParmA = DIB.createParameterVariable(
+            SP, "a", 1, AddFile, 1, IntTy, true, DINode::FlagZero);
+        auto *ParmB = DIB.createParameterVariable(
+            SP, "b", 2, AddFile, 1, IntTy, true, DINode::FlagZero);
 
-    // 第 2 行：int sum = a + b;
-    Builder.SetCurrentDebugLocation(DILocation::get(Context, 2, 1, SP));
-    Value *Sum = Builder.CreateAdd(A, B, "sum");
+        BasicBlock *BB = BasicBlock::Create(Context, "entry", F);
+        IRBuilder<> Builder(BB);
 
-    // 第 3 行：return sum;
-    Builder.SetCurrentDebugLocation(DILocation::get(Context, 3, 1, SP));
-    Builder.CreateRet(Sum);
+        auto args = F->args();
+        auto it = args.begin();
+        Value *A = it++;
+        Value *B = it;
 
-    // 完成调试信息构建（必须在 Module 被消费前调用）
+        Builder.SetCurrentDebugLocation(DILocation::get(Context, 1, 1, SP));
+        DIB.insertDbgValueIntrinsic(A, ParmA, DIB.createExpression(),
+                                    DILocation::get(Context, 1, 1, SP), BB);
+        DIB.insertDbgValueIntrinsic(B, ParmB, DIB.createExpression(),
+                                    DILocation::get(Context, 1, 1, SP), BB);
+
+        Builder.SetCurrentDebugLocation(DILocation::get(Context, 2, 1, SP));
+        Value *Sum = Builder.CreateAdd(A, B, "sum");
+
+        Builder.SetCurrentDebugLocation(DILocation::get(Context, 3, 1, SP));
+        Builder.CreateRet(Sum);
+    }
+
+    // ========================================================================
+    // 函数 2：jit_gcd —— 对应 jit_demo.cpp 中的 gcd 函数
+    // ========================================================================
+    {
+        FunctionType *FT = FunctionType::get(Int32Ty, {Int32Ty, Int32Ty}, false);
+        Function *F = Function::Create(FT, Function::ExternalLinkage, "jit_gcd", module.get());
+
+        SmallVector<Metadata *, 3> EltTys = {IntTy, IntTy, IntTy};
+        auto *SubRoutineTy = DIB.createSubroutineType(DIB.getOrCreateTypeArray(EltTys));
+
+        // DSubprogram 指向真实 jit_demo.cpp，定义行号 = 1
+        auto *SP = DIB.createFunction(
+            CU, "jit_gcd", "jit_gcd", GcdFile,
+            1, SubRoutineTy, 1,
+            DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
+        F->setSubprogram(SP);
+
+        auto *ParmX = DIB.createParameterVariable(
+            SP, "x", 1, GcdFile, 1, IntTy, true, DINode::FlagZero);
+        auto *ParmY = DIB.createParameterVariable(
+            SP, "y", 2, GcdFile, 1, IntTy, true, DINode::FlagZero);
+
+        // ---- 创建所有 BasicBlock ----
+        auto *Entry     = BasicBlock::Create(Context, "entry", F);
+        auto *IfThen1   = BasicBlock::Create(Context, "if.then1", F);
+        auto *IfEnd1    = BasicBlock::Create(Context, "if.end1", F);
+        auto *IfThen2   = BasicBlock::Create(Context, "if.then2", F);
+        auto *IfEnd2    = BasicBlock::Create(Context, "if.end2", F);
+        auto *WhileCond = BasicBlock::Create(Context, "while.cond", F);
+        auto *WhileBody = BasicBlock::Create(Context, "while.body", F);
+        auto *WhileEnd  = BasicBlock::Create(Context, "while.end", F);
+
+        auto Z32 = ConstantInt::get(Int32Ty, 0);
+
+        // ---- entry: 参数绑定 + 局部变量 alloca ----
+        IRBuilder<> B(Entry);
+        auto args = F->args();
+        auto it = args.begin();
+        Value *ArgX = it++;
+        Value *ArgY = it;
+
+        // 使用 alloca 模拟栈变量（-O0 风格），这样 GDB 可以正确显示变量值
+        auto *XAddr = B.CreateAlloca(Int32Ty, nullptr, "x");
+        auto *YAddr = B.CreateAlloca(Int32Ty, nullptr, "y");
+        auto *ZAddr = B.CreateAlloca(Int32Ty, nullptr, "z");
+        B.CreateStore(ArgX, XAddr);
+        B.CreateStore(ArgY, YAddr);
+
+        // 参数调试信息
+        B.SetCurrentDebugLocation(DILocation::get(Context, 1, 1, SP));
+        DIB.insertDeclare(XAddr, ParmX, DIB.createExpression(),
+                          DILocation::get(Context, 1, 1, SP), Entry);
+        DIB.insertDeclare(YAddr, ParmY, DIB.createExpression(),
+                          DILocation::get(Context, 1, 1, SP), Entry);
+
+        // ---- Line 2: if (x < 0) x = -x; ----
+        B.SetCurrentDebugLocation(DILocation::get(Context, 2, 1, SP));
+        Value *X0 = B.CreateLoad(Int32Ty, XAddr);
+        Value *Cmp1 = B.CreateICmpSLT(X0, Z32);
+        B.CreateCondBr(Cmp1, IfThen1, IfEnd1);
+
+        B.SetInsertPoint(IfThen1);
+        // 仍然在第 2 行
+        B.SetCurrentDebugLocation(DILocation::get(Context, 2, 1, SP));
+        Value *NegX = B.CreateNeg(B.CreateLoad(Int32Ty, XAddr));
+        B.CreateStore(NegX, XAddr);
+        B.CreateBr(IfEnd1);
+
+        // ---- Line 3: if (y < 0) y = -y; ----
+        B.SetInsertPoint(IfEnd1);
+        B.SetCurrentDebugLocation(DILocation::get(Context, 3, 1, SP));
+        Value *Y0 = B.CreateLoad(Int32Ty, YAddr);
+        Value *Cmp2 = B.CreateICmpSLT(Y0, Z32);
+        B.CreateCondBr(Cmp2, IfThen2, IfEnd2);
+
+        B.SetInsertPoint(IfThen2);
+        // 仍然在第 3 行
+        B.SetCurrentDebugLocation(DILocation::get(Context, 3, 1, SP));
+        Value *NegY = B.CreateNeg(B.CreateLoad(Int32Ty, YAddr));
+        B.CreateStore(NegY, YAddr);
+        B.CreateBr(IfEnd2);
+
+        // ---- 进入 while 循环 ----
+        B.SetInsertPoint(IfEnd2);
+        B.CreateBr(WhileCond);
+
+        // ---- Line 4: while (y) ----
+        B.SetInsertPoint(WhileCond);
+        B.SetCurrentDebugLocation(DILocation::get(Context, 4, 1, SP));
+        Value *YCond = B.CreateLoad(Int32Ty, YAddr);
+        Value *Tobool = B.CreateIsNotNull(YCond);
+        B.CreateCondBr(Tobool, WhileBody, WhileEnd);
+
+        // ---- Line 5: int z = x % y; ----
+        B.SetInsertPoint(WhileBody);
+        B.SetCurrentDebugLocation(DILocation::get(Context, 5, 1, SP));
+        Value *XBody = B.CreateLoad(Int32Ty, XAddr);
+        Value *YBody = B.CreateLoad(Int32Ty, YAddr);
+        Value *Rem = B.CreateSRem(XBody, YBody);
+        B.CreateStore(Rem, ZAddr);
+
+        // ---- Line 6: x = y; ----
+        B.SetCurrentDebugLocation(DILocation::get(Context, 6, 1, SP));
+        B.CreateStore(B.CreateLoad(Int32Ty, YAddr), XAddr);
+
+        // ---- Line 7: y = z; ----
+        B.SetCurrentDebugLocation(DILocation::get(Context, 7, 1, SP));
+        B.CreateStore(B.CreateLoad(Int32Ty, ZAddr), YAddr);
+
+        B.CreateBr(WhileCond);
+
+        // ---- Line 9: return x; ----
+        // 注意：跳过了 line 8（右花括号），直接到 line 9
+        B.SetInsertPoint(WhileEnd);
+        B.SetCurrentDebugLocation(DILocation::get(Context, 9, 1, SP));
+        Value *RetVal = B.CreateLoad(Int32Ty, XAddr);
+        B.CreateRet(RetVal);
+    }
+
+    // ========================================================================
+    // 完成调试信息生成，验证 IR
+    // ========================================================================
     DIB.finalize();
-
-    // ========================================================================
-    // 第 6 步：验证生成的 IR
-    // ========================================================================
     verifyModule(*module, &errs());
 
     // ========================================================================
-    // 第 7 步：创建 LLJIT 并启用 GDB 调试支持
+    // 创建 LLJIT 并启用 GDB 调试支持
     // ========================================================================
     ExitOnError ExitOnErr;
     auto J = ExitOnErr(LLJITBuilder().create());
 
-    // 【关键】enableDebuggerSupport 内部通过 createJITLoaderGDBRegistrar
-    // 查找 llvm_orc_registerJITLoaderGDBWrapper 符号。该符号在静态库
-    // libLLVMOrcTargetProcess.a 中，不会自动出现在动态符号表中，
-    // 因此需要手动注册到全局符号表，使 enableDebuggerSupport 能找到它。
     sys::DynamicLibrary::AddSymbol(
         "llvm_orc_registerJITLoaderGDBWrapper",
         reinterpret_cast<void *>(&llvm_orc_registerJITLoaderGDBWrapper));
 
-    // enableDebuggerSupport 将 JIT 生成的代码注册到 GDB JIT 接口
-    // (__jit_debug_register_code)，使 GDB 知道这些动态生成的代码区域。
-    // ELF (Linux)  → 内部使用 DebugObjectManagerPlugin
-    // MachO (macOS) → 内部使用 GDBJITDebugInfoRegistrationPlugin
     ExitOnErr(enableDebuggerSupport(*J));
 
     // ========================================================================
-    // 第 8 步：将 IR Module 提交给 JIT 编译
+    // 提交 Module 给 JIT
     // ========================================================================
     ExitOnErr(J->addIRModule(
         ThreadSafeModule(std::move(module), std::make_unique<LLVMContext>())
     ));
 
     // ========================================================================
-    // 第 9 步：查找已编译的函数符号并调用
+    // 查找并调用 JIT 函数
     // ========================================================================
-    auto Addr = ExitOnErr(J->lookup("jit_add"));
-    using AddFn = int (*)(int, int);
-    auto *Add = Addr.toPtr<AddFn>();
+    using BinFn = int (*)(int, int);
 
-    int result = Add(42, 58);
-    outs() << "add(42, 58) = " << result << "\n";
+    auto AddFn = ExitOnErr(J->lookup("jit_add")).toPtr<BinFn>();
+    outs() << "jit_add(42, 58) = " << AddFn(42, 58) << "\n";
+
+    auto GcdFn = ExitOnErr(J->lookup("jit_gcd")).toPtr<BinFn>();
+    outs() << "jit_gcd(1071, 462) = " << GcdFn(1071, 462) << "\n";
 
     return 0;
 }

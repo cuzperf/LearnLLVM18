@@ -65,3 +65,10 @@ target_link_libraries(jit_demo PRIVATE ${llvm_libs})
 set_target_properties(jit_demo PROPERTIES
     ENABLE_EXPORTS ON
 )
+
+# ============================================================================
+# 宏定义：项目源码根目录（用于 JIT 调试信息中定位源文件）
+# ============================================================================
+target_compile_definitions(jit_demo PRIVATE
+    PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
