@@ -1,7 +1,0 @@
-/home/czp/cuzperf/LearnLLVM/build/CMakeFiles/intrinsics_gen.dir
-/home/czp/cuzperf/LearnLLVM/build/CMakeFiles/omp_gen.dir
-/home/czp/cuzperf/LearnLLVM/build/CMakeFiles/acc_gen.dir
-/home/czp/cuzperf/LearnLLVM/build/CMakeFiles/RISCVTargetParserTableGen.dir
-/home/czp/cuzperf/LearnLLVM/build/CMakeFiles/jit_demo.dir
-/home/czp/cuzperf/LearnLLVM/build/CMakeFiles/edit_cache.dir
-/home/czp/cuzperf/LearnLLVM/build/CMakeFiles/rebuild_cache.dir

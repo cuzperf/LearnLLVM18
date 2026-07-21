@@ -39,6 +39,8 @@ llvm_map_components_to_libnames(llvm_libs
     Core
     ExecutionEngine
     OrcJIT
+    OrcDebugging
+    OrcTargetProcess
     MCJIT
     Support
     nativecodegen
@@ -53,3 +55,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(jit_demo main.cpp)
 target_link_libraries(jit_demo PRIVATE ${llvm_libs})
+
+# ============================================================================
+# 导出所有符号到动态符号表（JIT 调试必需）
+# ============================================================================
+# enableDebuggerSupport 内部通过 dlsym 查找
+# llvm_orc_registerJITLoaderGDBWrapper 等注册函数，
+# 需要用 -rdynamic 将所有符号导出到 .dynsym 段。
+set_target_properties(jit_demo PROPERTIES
+    ENABLE_EXPORTS ON
+)
