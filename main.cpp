@@ -103,8 +103,8 @@ int main()
     // DIFile 告诉 GDB "这段代码来自哪个文件"。
     // PROJECT_SOURCE_DIR 是 CMake 注入的宏，值为项目根目录的绝对路径。
     // 使用绝对路径确保 GDB 一定找得到 jit_demo.cpp。
-    std::string GcdFilePath = std::string(PROJECT_SOURCE_DIR) + "/jit_demo.cpp";
     std::string GcdFileDir  = std::string(PROJECT_SOURCE_DIR);
+    std::string GcdFilePath = GcdFileDir + "/jit_demo.cpp";
     auto *GcdFile = DIB.createFile(GcdFilePath, GcdFileDir);
 
     // === 编译单元（CU） ===
