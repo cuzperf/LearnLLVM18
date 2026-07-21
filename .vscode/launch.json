@@ -25,7 +25,7 @@
                     "ignoreFailures": true
                 }
             ],
-            "preLaunchTask": "cmake build jit_demo"
+            // "preLaunchTask": "cmake build jit_demo"
         }
     ]
 }
