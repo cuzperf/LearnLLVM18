@@ -23,7 +23,34 @@
                     "description": "将反汇编风格设置为 Intel",
                     "text": "-gdb-set disassembly-flavor intel",
                     "ignoreFailures": true
-                }
+                },
+                {
+                    "description": "单步调试时跳过 std 命名空间（STL）函数",
+                    "text": "-interpreter-exec console \"skip -rfunction ^std::\"",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "单步调试时跳过 libstdc++ 内部命名空间函数",
+                    "text": "-interpreter-exec console \"skip -rfunction ^__gnu_cxx::\"",
+                    "ignoreFailures": true
+                },
+                // {
+                //     "description": "单步调试时跳过 llvm 命名空间中的函数（覆盖 LLVM 头文件内联函数）",
+                //     "text": "-interpreter-exec console \"skip -rfunction ^llvm::\"",
+                //     "ignoreFailures": true
+                // },
+                // {
+                //     "description": "单步调试时跳过 /usr/include 直接子级文件中的函数（注意：gdb glob 的 * 不跨目录，gdb18 之后才可以用。。。）",
+                //     "text": "-interpreter-exec console \"skip -gfile /usr/include/**\"",
+                //     "ignoreFailures": true
+                // },
+                // 注意：gdb 的 skip -gfile 使用 FNM_PATHNAME 语义，* 不匹配 /。
+                // 要按路径跳过深层头文件需逐级展开，例如：
+                // {
+                //     "description": "跳过 /usr/include/c++ 下两级深度的头文件",
+                //     "text": "-interpreter-exec console \"skip -gfile /usr/include/c++/*/*\"",
+                //     "ignoreFailures": true
+                // }
             ],
             // "preLaunchTask": "cmake build jit_demo"
         }
