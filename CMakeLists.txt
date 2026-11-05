@@ -66,3 +66,61 @@ target_compile_definitions(jit_staticlibrary_demo PRIVATE
 
 # 保证先产出 libjitgcd.a，再编译 demo
 add_dependencies(jit_staticlibrary_demo jitgcd)
+
+# ============================================================================
+# 路线二 demo：源码 → LLVM IR → addIRModule
+# ============================================================================
+
+# 找 clang++（优先与 LLVM 同版本），用于构建期把源码编成 LLVM IR
+find_program(CLANGXX_EXECUTABLE NAMES clang++-19 clang++-18 clang++ REQUIRED)
+
+# 构建期把 jit_demo.cpp 编译成 LLVM IR 文本 gcd.ll
+set(GCD_IR_FILE "${CMAKE_BINARY_DIR}/gcd.ll")
+add_custom_command(
+    OUTPUT "${GCD_IR_FILE}"
+    COMMAND "${CLANGXX_EXECUTABLE}" -S -emit-llvm
+            "${CMAKE_SOURCE_DIR}/jit_demo.cpp" -o "${GCD_IR_FILE}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/jit_demo.cpp"
+    COMMENT "生成 LLVM IR: ${GCD_IR_FILE}"
+    VERBATIM
+)
+add_custom_target(gcd_ir DEPENDS "${GCD_IR_FILE}")
+
+add_executable(jit_irfile_demo jit_irfile_demo.cpp)
+target_link_libraries(jit_irfile_demo PRIVATE LLVM)
+
+# 宏定义：IR 文件的完整路径
+target_compile_definitions(jit_irfile_demo PRIVATE
+    GCD_IR_PATH="${GCD_IR_FILE}"
+)
+
+# 保证先生成 gcd.ll，再编译 demo
+add_dependencies(jit_irfile_demo gcd_ir)
+
+# ============================================================================
+# 路线三 demo：源码 → 目标文件 .o → addObjectFile
+# ============================================================================
+
+# 构建期把 jit_demo.cpp 编译成可重定位目标文件 gcd_for_jit.o
+# -fPIC：JIT 分配的可执行内存位置不固定，PIC 可避免重定位溢出
+set(GCD_OBJ_FILE "${CMAKE_BINARY_DIR}/gcd_for_jit.o")
+add_custom_command(
+    OUTPUT "${GCD_OBJ_FILE}"
+    COMMAND "${CMAKE_CXX_COMPILER}" -fPIC -c
+            "${CMAKE_SOURCE_DIR}/jit_demo.cpp" -o "${GCD_OBJ_FILE}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/jit_demo.cpp"
+    COMMENT "生成目标文件: ${GCD_OBJ_FILE}"
+    VERBATIM
+)
+add_custom_target(gcd_obj DEPENDS "${GCD_OBJ_FILE}")
+
+add_executable(jit_objfile_demo jit_objfile_demo.cpp)
+target_link_libraries(jit_objfile_demo PRIVATE LLVM)
+
+# 宏定义：目标文件的完整路径
+target_compile_definitions(jit_objfile_demo PRIVATE
+    GCD_OBJ_PATH="${GCD_OBJ_FILE}"
+)
+
+# 保证先生成 gcd_for_jit.o，再编译 demo
+add_dependencies(jit_objfile_demo gcd_obj)
