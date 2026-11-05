@@ -124,3 +124,39 @@ target_compile_definitions(jit_objfile_demo PRIVATE
 
 # 保证先生成 gcd_for_jit.o，再编译 demo
 add_dependencies(jit_objfile_demo gcd_obj)
+
+# ============================================================================
+# 路线一 demo：函数实现编进主程序，JIT 从进程符号表解析
+# ============================================================================
+
+# 把 jit_demo.cpp 直接编进可执行文件：gcd 的实现就在进程地址空间里
+add_executable(jit_hostsymbol_demo jit_hostsymbol_demo.cpp jit_demo.cpp)
+target_link_libraries(jit_hostsymbol_demo PRIVATE LLVM)
+
+# 关键：-rdynamic，把可执行文件的符号导出到动态符号表，
+# 否则 GetForCurrentProcess（底层是 dlsym）查不到 gcd
+set_target_properties(jit_hostsymbol_demo PROPERTIES
+    ENABLE_EXPORTS ON
+)
+
+# ============================================================================
+# 路线四 demo：函数实现在共享库 .so 中，JIT 运行期动态加载
+# ============================================================================
+
+# 把 jit_demo.cpp 编成共享库 libgcdshared.so
+add_library(gcdshared SHARED jit_demo.cpp)
+
+add_executable(jit_sharedlibrary_demo jit_sharedlibrary_demo.cpp)
+
+# 只链接 LLVM，故意【不】链接 gcdshared：.so 由 JIT 在运行期 dlopen，
+# 这样 demo 能跑通就证明符号确实是动态加载解析出来的
+target_link_libraries(jit_sharedlibrary_demo PRIVATE LLVM)
+
+# 宏定义：共享库的完整路径（$<TARGET_FILE:gcdshared> 展开为
+# libgcdshared.so 的实际输出路径）
+target_compile_definitions(jit_sharedlibrary_demo PRIVATE
+    GCD_SO_PATH="$<TARGET_FILE:gcdshared>"
+)
+
+# 保证先产出 libgcdshared.so，再编译 demo
+add_dependencies(jit_sharedlibrary_demo gcdshared)
