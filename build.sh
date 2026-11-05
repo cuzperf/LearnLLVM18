@@ -69,3 +69,5 @@ echo "==> 运行 JIT Demo..."
 
 echo ""
 echo "==> 构建与运行完成"
+
+build/jit_staticlibrary_demo

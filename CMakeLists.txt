@@ -41,3 +41,28 @@ set_target_properties(jit_demo PROPERTIES
 target_compile_definitions(jit_demo PRIVATE
     PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+
+# ============================================================================
+# 静态库 demo：JIT 代码调用 .a 归档中实现的函数
+# ============================================================================
+
+# 把 jit_demo.cpp 编成静态库 libjitgcd.a，作为"外部函数实现"的载体
+# POSITION_INDEPENDENT_CODE = -fPIC：JIT 分配的可执行内存位置不固定，
+# PIC 可避免小代码模型重定位溢出
+add_library(jitgcd STATIC jit_demo.cpp)
+set_target_properties(jitgcd PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+add_executable(jit_staticlibrary_demo jit_staticlibrary_demo.cpp)
+
+# 只链接 LLVM，故意【不】链接 jitgcd：进程的符号表里没有 gcd，
+# 这样 demo 能跑通就证明符号确实是从 .a 归档中解析出来的
+target_link_libraries(jit_staticlibrary_demo PRIVATE LLVM)
+
+# 宏定义：归档文件的完整路径（$<TARGET_FILE:jitgcd> 是 CMake 生成表达式，
+# 展开为 libjitgcd.a 的实际输出路径）
+target_compile_definitions(jit_staticlibrary_demo PRIVATE
+    JITGCD_ARCHIVE_PATH="$<TARGET_FILE:jitgcd>"
+)
+
+# 保证先产出 libjitgcd.a，再编译 demo
+add_dependencies(jit_staticlibrary_demo jitgcd)
