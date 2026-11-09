@@ -176,11 +176,13 @@ int main()
     );
     F->setSubprogram(SP);  // 将调试元数据绑定到 IR 函数上
 
+    unsigned nheader = 2;
+
     // DILocalVariable: 描述函数参数（调试时 GDB 可显示参数名和值）
     auto *ParmX = DIB.createParameterVariable(
-        SP, "x", 1, GcdFile, 1, IntTy, true, llvm::DINode::FlagZero);
+        SP, "x", 1, GcdFile, nheader + 1, IntTy, true, llvm::DINode::FlagZero);
     auto *ParmY = DIB.createParameterVariable(
-        SP, "y", 2, GcdFile, 1, IntTy, true, llvm::DINode::FlagZero);
+        SP, "y", 2, GcdFile, nheader + 1, IntTy, true, llvm::DINode::FlagZero);
     //     ↑变量名 ↑参数序号 ↑文件 ↑行号 ↑类型 ↑保留参数（非可选） ↑无特殊标志
 
     // ----- 5c: 创建 BasicBlock（基本块）-----
@@ -236,14 +238,14 @@ int main()
 
     // 调试信息：告诉 GDB "x 和 y 存在 XAddr/YAddr 指向的栈位置上"
     // insertDeclare 生成一个 llvm.dbg.declare 内置函数调用
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 1, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 1, 1, SP));
     DIB.insertDeclare(XAddr, ParmX, DIB.createExpression(),
-                      llvm::DILocation::get(Context, 1, 1, SP), Entry);
+                      llvm::DILocation::get(Context, nheader + 1, 1, SP), Entry);
     DIB.insertDeclare(YAddr, ParmY, DIB.createExpression(),
-                      llvm::DILocation::get(Context, 1, 1, SP), Entry);
+                      llvm::DILocation::get(Context, nheader + 1, 1, SP), Entry);
 
     // ----- 第 2 行：if (x < 0) x = -x; -----
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 2, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 2, 1, SP));
     //                                   行号=2 ↑列号=1 ↑所属函数 SP
     llvm::Value *X0   = B.CreateLoad(Int32Ty, XAddr);          // %t = load x
     llvm::Value *Cmp1 = B.CreateICmpSLT(X0, Z32);              // %t < 0 ? (有符号比较)
@@ -252,7 +254,7 @@ int main()
 
     // --- IfThen1: x = -x ---
     B.SetInsertPoint(IfThen1);  // 从现在开始，指令插到 IfThen1 块
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 2, 1, SP));  // 仍在第 2 行
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 2, 1, SP));  // 仍在第 2 行
     llvm::Value *NegX = B.CreateNeg(B.CreateLoad(Int32Ty, XAddr));  // -x
     B.CreateStore(NegX, XAddr);                                // x = -x
     B.CreateBr(IfEnd1);  // 无条件跳转到 if.end1（汇合点）
@@ -261,14 +263,14 @@ int main()
     B.SetInsertPoint(IfEnd1);
 
     // ----- 第 3 行：if (y < 0) y = -y; -----
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 3, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 3, 1, SP));
     llvm::Value *Y0   = B.CreateLoad(Int32Ty, YAddr);
     llvm::Value *Cmp2 = B.CreateICmpSLT(Y0, Z32);
     B.CreateCondBr(Cmp2, IfThen2, IfEnd2);
 
     // --- IfThen2: y = -y ---
     B.SetInsertPoint(IfThen2);
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 3, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 3, 1, SP));
     llvm::Value *NegY = B.CreateNeg(B.CreateLoad(Int32Ty, YAddr));
     B.CreateStore(NegY, YAddr);
     B.CreateBr(IfEnd2);
@@ -279,25 +281,25 @@ int main()
 
     // ----- 第 4 行：while (y) -----
     B.SetInsertPoint(WhileCond);
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 4, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 4, 1, SP));
     llvm::Value *YCond = B.CreateLoad(Int32Ty, YAddr);             // 加载 y 的当前值
     llvm::Value *Tobool = B.CreateIsNotNull(YCond);                 // y != 0 ?
     B.CreateCondBr(Tobool, WhileBody, WhileEnd);             // 真→循环体 假→退出
 
     // ----- 第 5 行：int z = x % y; -----
     B.SetInsertPoint(WhileBody);
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 5, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 5, 1, SP));
     llvm::Value *XBody = B.CreateLoad(Int32Ty, XAddr);
     llvm::Value *YBody = B.CreateLoad(Int32Ty, YAddr);
     llvm::Value *Rem   = B.CreateSRem(XBody, YBody);               // x % y (有符号取余)
     B.CreateStore(Rem, ZAddr);                                // z = x % y
 
     // ----- 第 6 行：x = y; -----
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 6, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 6, 1, SP));
     B.CreateStore(B.CreateLoad(Int32Ty, YAddr), XAddr);      // x = y
 
     // ----- 第 7 行：y = z; -----
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 7, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 7, 1, SP));
     B.CreateStore(B.CreateLoad(Int32Ty, ZAddr), YAddr);      // y = z
 
     // 循环体结束，跳回 while 条件判断处（形成循环）
@@ -306,7 +308,7 @@ int main()
     // ----- 第 9 行：return x; -----
     // 注意：行 8 是 while 的右花括号 }，通常不给它设置调试位置
     B.SetInsertPoint(WhileEnd);
-    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, 9, 1, SP));
+    B.SetCurrentDebugLocation(llvm::DILocation::get(Context, nheader + 9, 1, SP));
     llvm::Value *RetVal = B.CreateLoad(Int32Ty, XAddr);   // 加载 x
     B.CreateRet(RetVal);                             // return x
 
