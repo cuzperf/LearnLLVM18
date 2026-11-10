@@ -160,3 +160,19 @@ target_compile_definitions(jit_sharedlibrary_demo PRIVATE
 
 # 保证先产出 libgcdshared.so，再编译 demo
 add_dependencies(jit_sharedlibrary_demo gcdshared)
+
+# ============================================================================
+# 路线二（运行期编译版）demo：运行期调 clang 把源码编成 IR 再 JIT
+# ============================================================================
+
+add_executable(jit_runtimecompile_demo jit_runtimecompile_demo.cpp)
+target_link_libraries(jit_runtimecompile_demo PRIVATE LLVM)
+
+# 宏定义：
+#   CLANGXX_PATH        —— 运行期要调用的 clang++ 完整路径
+#                          （复用路线二 find_program 找到的 CLANGXX_EXECUTABLE）
+#   JIT_DEMO_SOURCE_PATH —— 要在运行期编译的源文件路径
+target_compile_definitions(jit_runtimecompile_demo PRIVATE
+    CLANGXX_PATH="${CLANGXX_EXECUTABLE}"
+    JIT_DEMO_SOURCE_PATH="${CMAKE_SOURCE_DIR}/jit_demo.cpp"
+)
