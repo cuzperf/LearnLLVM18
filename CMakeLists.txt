@@ -176,3 +176,35 @@ target_compile_definitions(jit_runtimecompile_demo PRIVATE
     CLANGXX_PATH="${CLANGXX_EXECUTABLE}"
     JIT_DEMO_SOURCE_PATH="${CMAKE_SOURCE_DIR}/jit_demo.cpp"
 )
+
+# ============================================================================
+# clang-as-a-library demo：进程内用 clang API 把源码编成 IR 再 JIT
+# ============================================================================
+
+# 查找 clang 包（需要 libclang-19-dev，提供 clang C++ 头文件与
+# libclang-cpp 库；ClangConfig.cmake 与 LLVM 同版本配套）
+if(NOT DEFINED Clang_DIR)
+    set(Clang_DIR /usr/lib/llvm-19/lib/cmake/clang)
+endif()
+find_package(Clang REQUIRED CONFIG)
+
+# clang 内置头文件目录（stddef.h 等），等价于 `clang++ -print-resource-dir`
+execute_process(
+    COMMAND "${CLANGXX_EXECUTABLE}" -print-resource-dir
+    OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+add_executable(jit_clanglib_demo jit_clanglib_demo.cpp)
+
+# clang-cpp = libclang-cpp 组合库（ClangTargets.cmake 导出的导入目标，
+# 内含全部 clang 前端组件，并声明了对 LLVM 的依赖）
+target_link_libraries(jit_clanglib_demo PRIVATE clang-cpp LLVM)
+
+# 宏定义：
+#   JIT_DEMO_SOURCE_PATH —— 要在进程内编译的源文件路径
+#   CLANG_RESOURCE_DIR   —— clang 内置头文件目录（演示 resource-dir 参数）
+target_compile_definitions(jit_clanglib_demo PRIVATE
+    JIT_DEMO_SOURCE_PATH="${CMAKE_SOURCE_DIR}/jit_demo.cpp"
+    CLANG_RESOURCE_DIR="${CLANG_RESOURCE_DIR}"
+)
